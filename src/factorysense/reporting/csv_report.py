@@ -29,6 +29,10 @@ def summarize_inspection_report(df: pd.DataFrame) -> dict:
             "accuracy": None,
             "mean_anomaly_score": 0.0,
             "mean_defect_area_percent": 0.0,
+            "tp": 0,
+            "tn": 0,
+            "fp": 0,
+            "fn": 0,
         }
 
     total_images = len(df)
@@ -37,8 +41,18 @@ def summarize_inspection_report(df: pd.DataFrame) -> dict:
     defect_rate_percent = rejected_images / total_images * 100
 
     accuracy = None
-    if "correct" in df.columns:
-        accuracy = float(df["correct"].mean())
+    tp = tn = fp = fn = 0
+
+    if {"true_label", "predicted_label"}.issubset(df.columns):
+        true = df["true_label"].astype(int)
+        pred = df["predicted_label"].astype(int)
+
+        tp = int(((true == 1) & (pred == 1)).sum())
+        tn = int(((true == 0) & (pred == 0)).sum())
+        fp = int(((true == 0) & (pred == 1)).sum())
+        fn = int(((true == 1) & (pred == 0)).sum())
+
+        accuracy = float((true == pred).mean())
 
     return {
         "total_images": total_images,
@@ -48,4 +62,8 @@ def summarize_inspection_report(df: pd.DataFrame) -> dict:
         "accuracy": accuracy,
         "mean_anomaly_score": float(df["anomaly_score"].mean()),
         "mean_defect_area_percent": float(df["defect_area_percent"].mean()),
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
     }

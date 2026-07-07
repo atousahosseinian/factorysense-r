@@ -22,15 +22,17 @@ class SimpleDifferenceAnomalyDetector:
     It builds a reference image from normal training images and detects anomalies
     by measuring pixel-level differences from that reference.
 
-    This is not a strong industrial model, but it teaches the full anomaly
-    detection pipeline:
-    reference normal pattern -> anomaly map -> score -> threshold -> decision.
+    This baseline is intentionally simple. It is useful for learning the full
+    anomaly detection pipeline before moving to PatchCore or PaDiM.
     """
 
     def __init__(self, image_size: int = 256):
         self.image_size = image_size
         self.reference_image: np.ndarray | None = None
         self.threshold: float | None = None
+        self.base_threshold: float | None = None
+        self.threshold_multiplier: float = 1.0
+        self.threshold_margin: float = 0.0
 
     def fit(self, normal_image_paths: Iterable[str | Path]) -> None:
         arrays = [
@@ -48,10 +50,8 @@ class SimpleDifferenceAnomalyDetector:
             raise ValueError("Model is not fitted yet.")
 
         image = load_image_array(image_path, image_size=self.image_size)
-
         diff = np.abs(image - self.reference_image)
 
-        # Convert RGB difference into a single-channel anomaly map.
         anomaly = np.mean(diff, axis=2)
 
         return anomaly.astype("float32")
@@ -59,17 +59,40 @@ class SimpleDifferenceAnomalyDetector:
     def score(self, image_path: str | Path) -> float:
         amap = self.anomaly_map(image_path)
 
-        # Use high-percentile difference instead of mean.
-        # This makes the score more sensitive to local defects.
+        # High-percentile score is more sensitive to local defects than mean.
         return float(np.quantile(amap, 0.99))
 
-    def calibrate_threshold(self, normal_image_paths: Iterable[str | Path], quantile: float = 0.95) -> float:
+    def calibrate_threshold(
+        self,
+        normal_image_paths: Iterable[str | Path],
+        quantile: float = 0.95,
+        multiplier: float = 1.2,
+        margin: float = 0.0,
+    ) -> float:
+        """
+        Calibrate threshold from normal images.
+
+        base_threshold = quantile(normal_scores)
+        threshold = base_threshold * multiplier + margin
+
+        The multiplier is a safety factor to reduce false positives.
+        """
+        if not 0 < quantile < 1:
+            raise ValueError("quantile must be between 0 and 1")
+
+        if multiplier <= 0:
+            raise ValueError("multiplier must be positive")
+
         scores = [self.score(path) for path in normal_image_paths]
 
         if not scores:
             raise ValueError("No normal images were provided for threshold calibration.")
 
-        self.threshold = float(np.quantile(scores, quantile))
+        self.base_threshold = float(np.quantile(scores, quantile))
+        self.threshold_multiplier = float(multiplier)
+        self.threshold_margin = float(margin)
+        self.threshold = float(self.base_threshold * multiplier + margin)
+
         return self.threshold
 
     def predict(self, image_path: str | Path) -> dict:
@@ -107,6 +130,9 @@ class SimpleDifferenceAnomalyDetector:
             image_size=self.image_size,
             reference_image=self.reference_image,
             threshold=-1.0 if self.threshold is None else self.threshold,
+            base_threshold=-1.0 if self.base_threshold is None else self.base_threshold,
+            threshold_multiplier=self.threshold_multiplier,
+            threshold_margin=self.threshold_margin,
         )
 
     @classmethod
@@ -119,5 +145,15 @@ class SimpleDifferenceAnomalyDetector:
 
         threshold = float(data["threshold"])
         model.threshold = None if threshold < 0 else threshold
+
+        if "base_threshold" in data.files:
+            base_threshold = float(data["base_threshold"])
+            model.base_threshold = None if base_threshold < 0 else base_threshold
+
+        if "threshold_multiplier" in data.files:
+            model.threshold_multiplier = float(data["threshold_multiplier"])
+
+        if "threshold_margin" in data.files:
+            model.threshold_margin = float(data["threshold_margin"])
 
         return model

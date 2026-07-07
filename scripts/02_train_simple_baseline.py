@@ -16,6 +16,8 @@ def main():
     parser.add_argument("--category", default="bottle")
     parser.add_argument("--image-size", type=int, default=256)
     parser.add_argument("--threshold-quantile", type=float, default=0.95)
+    parser.add_argument("--threshold-multiplier", type=float, default=1.2)
+    parser.add_argument("--threshold-margin", type=float, default=0.0)
     parser.add_argument("--output", default="models/simple_baseline_bottle.npz")
     args = parser.parse_args()
 
@@ -27,13 +29,23 @@ def main():
 
     model = SimpleDifferenceAnomalyDetector(image_size=args.image_size)
     model.fit(normal_paths)
-    threshold = model.calibrate_threshold(normal_paths, quantile=args.threshold_quantile)
+
+    threshold = model.calibrate_threshold(
+        normal_paths,
+        quantile=args.threshold_quantile,
+        multiplier=args.threshold_multiplier,
+        margin=args.threshold_margin,
+    )
+
     model.save(args.output)
 
     print("Simple baseline trained.")
     print(f"Category: {args.category}")
     print(f"Normal train images: {len(normal_paths)}")
-    print(f"Threshold: {threshold:.6f}")
+    print(f"Base threshold: {model.base_threshold:.6f}")
+    print(f"Threshold multiplier: {model.threshold_multiplier:.3f}")
+    print(f"Threshold margin: {model.threshold_margin:.6f}")
+    print(f"Final threshold: {threshold:.6f}")
     print(f"Saved model to: {args.output}")
 
 
