@@ -20,43 +20,120 @@ The goal is to detect visual anomalies in industrial product images, generate an
 
 ---
 
-## Why This Project?
+## Current Implementation
 
-Most beginner computer vision projects focus on object detection.
+The current version includes:
 
-FactorySense-R focuses on industrial anomaly detection, where the system learns what "normal" looks like and detects deviations from normal patterns.
+- MVTec-style dataset explorer
+- Synthetic demo dataset generator
+- Simple difference-based anomaly detector
+- Threshold calibration with multiplier and margin
+- Single-image inspection dashboard
+- Batch inspection dashboard
+- CSV report generation
+- Error analysis preview
+- Robustness testing dashboard
 
-This makes the project more relevant to real-world quality inspection problems.
+---
+
+## Demo Dataset
+
+For the first development phase, the project uses a lightweight synthetic MVTec-style demo dataset.
+
+The demo dataset contains:
+
+- Category: bottle
+- Train good images: 12
+- Test good images: 6
+- Test defective images: 12
+- Defect types: broken_large, contamination, scratch
+
+This allows the full pipeline to be tested without downloading the full MVTec AD dataset.
+
+---
+
+## Simple Baseline Model
+
+The first anomaly detector is an educational pixel-difference baseline.
+
+Pipeline:
+
+1. Normal training images
+2. Average normal reference image
+3. Pixel difference map
+4. Anomaly score
+5. Calibrated threshold
+6. Pass / Reject decision
+
+This model is intentionally simple. Its purpose is to teach the anomaly detection workflow before moving to stronger feature-based models such as PatchCore and PaDiM.
+
+---
+
+## Batch Inspection Result
+
+On the clean synthetic demo dataset, after threshold calibration:
+
+- Total test images: 18
+- Rejected images: 12
+- Passed images: 6
+- Accuracy: 100%
+- Errors: 0
+
+This means the model correctly rejects defective images and passes normal images in the clean demo setting.
+
+---
+
+## Robustness Result
+
+The robustness dashboard tests the model under:
+
+- Rotation
+- Brightness changes
+- Contrast changes
+
+Normal-only robustness test result:
+
+- Original normal images:
+  - Reject rate: 0%
+  - Accuracy: 100%
+
+- Shifted normal images:
+  - Reject rate: 100%
+  - Accuracy: 0%
+
+This shows that the simple pixel-difference baseline is not robust to real-world shifts.
+
+---
+
+## Key Learning
+
+The current baseline works on clean aligned images, but it fails under lighting, contrast, and rotation changes.
+
+This is an important finding for industrial anomaly detection:
+
+> A model can look accurate on clean benchmark-style data but fail under real-world visual shifts.
+
+This motivates the next phase of the project: replacing the simple pixel baseline with feature-based anomaly detection models such as PatchCore and PaDiM.
 
 ---
 
 ## Planned Pipeline
 
-```text
-Image
-  ↓
-Preprocessing
-  ↓
-Anomaly Detection Model
-  ↓
-Anomaly Score + Heatmap
-  ↓
-Threshold Calibration
-  ↓
-Pass / Reject / Risk Level
-  ↓
-Dashboard + CSV Report
-```
+Image → Preprocessing → Anomaly Detection Model → Anomaly Score + Heatmap → Threshold Calibration → Pass / Reject / Risk Level → Dashboard + CSV Report
 
 ---
 
 ## Main Models
 
-### Phase 1: PatchCore
+### Phase 1: Simple Difference Baseline
 
-PatchCore will be the first baseline model because it is suitable for anomaly detection without heavy training.
+Already implemented as an educational baseline.
 
-### Phase 2: PaDiM
+### Phase 2: PatchCore
+
+PatchCore will be added as the first feature-based anomaly detection baseline.
+
+### Phase 3: PaDiM
 
 PaDiM will be added as a lightweight statistical baseline.
 
@@ -69,7 +146,7 @@ PaDiM will be added as a lightweight statistical baseline.
 
 ## Robustness Experiments
 
-FactorySense-R will evaluate model stability under:
+FactorySense-R evaluates model stability under:
 
 - Normal data diversity
 - Image rotation
@@ -83,7 +160,6 @@ FactorySense-R will evaluate model stability under:
 
 ## Project Structure
 
-```text
 factorysense-r/
 ├── app.py
 ├── configs/
@@ -96,7 +172,6 @@ factorysense-r/
 ├── outputs/
 ├── reports/
 └── assets/
-```
 
 ---
 
@@ -104,26 +179,40 @@ factorysense-r/
 
 - [x] Project architecture planned
 - [x] Repository structure initialized
-- [ ] Data explorer
+- [x] Data explorer
+- [x] Synthetic MVTec-style demo dataset
+- [x] Simple baseline anomaly detector
+- [x] Threshold calibration
+- [x] Single-image inspection dashboard
+- [x] Batch inspection dashboard
+- [x] CSV reporting
+- [x] Robustness experiments
+- [x] Robustness dashboard
 - [ ] PatchCore baseline
-- [ ] Threshold calibration
-- [ ] Robustness experiments
-- [ ] Streamlit dashboard
-- [ ] Model comparison
+- [ ] PaDiM comparison
+- [ ] Full MVTec AD evaluation
 - [ ] Final GitHub presentation
 
 ---
 
-## Educational Roadmap
+## Next Phase
 
-This project is built step by step.
+The next development phase will add a PatchCore baseline.
 
-Each phase includes code, explanation, and Git commits so the developer can learn the concepts while building the project.
+Planned improvements:
+
+- Use pretrained CNN features instead of raw pixel differences
+- Build a normal feature memory bank
+- Generate feature-based anomaly maps
+- Compare PatchCore against the simple baseline
+- Re-run robustness tests under rotation, brightness, and contrast shifts
+- Analyze whether PatchCore reduces false positives under real-world shifts
 
 ---
 
 ## Limitations
 
-- The first version will use public datasets only.
-- The project starts with training-light models due to MacBook hardware constraints.
-- Real factory deployment requires additional calibration with real production data.
+- The first version uses a synthetic demo dataset.
+- The simple baseline is not robust to lighting, contrast, and rotation shifts.
+- Real factory deployment requires calibration with real production data.
+- Stronger feature-based models are needed for real industrial inspection.
