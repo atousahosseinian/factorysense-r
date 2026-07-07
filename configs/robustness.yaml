@@ -1,0 +1,15 @@
+rotation:
+  enabled: true
+  angles: [0, 5, -5, 10, -10, 90, 180, 270]
+
+lighting:
+  enabled: true
+  brightness_factors: [0.6, 0.8, 1.0, 1.2, 1.4]
+  contrast_factors: [0.7, 1.0, 1.3]
+
+normal_diversity:
+  enabled: true
+  banks:
+    small: 10
+    medium: 50
+    large: 100

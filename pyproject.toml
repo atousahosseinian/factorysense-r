@@ -1,0 +1,9 @@
+[project]
+name = "factorysense-r"
+version = "0.1.0"
+description = "Robust industrial anomaly detection and quality analytics dashboard"
+requires-python = ">=3.10,<3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,30 @@
+project:
+  name: factorysense-r
+  phase: patchcore-baseline
+
+data:
+  dataset_name: mvtec_ad
+  dataset_root: data/mvtec
+  category: bottle
+  image_size: 256
+
+model:
+  name: patchcore
+  backbone: wide_resnet50_2
+  layers:
+    - layer2
+    - layer3
+  coreset_ratio: 0.1
+
+inference:
+  device: auto
+  batch_size: 1
+
+threshold:
+  method: quantile
+  quantile: 0.95
+
+outputs:
+  root: outputs
+  save_heatmaps: true
+  save_csv: true
