@@ -11,6 +11,10 @@ sys.path.insert(0, str(SRC_ROOT))
 from factorysense.data.mvtec_loader import MVTecDatasetExplorer
 from factorysense.models.simple_baseline import SimpleDifferenceAnomalyDetector
 from factorysense.reporting.csv_report import summarize_inspection_report
+from factorysense.robustness.robustness_runner import (
+    build_robustness_report,
+    summarize_robustness_report,
+)
 from factorysense.visualization.heatmap import (
     anomaly_map_to_pil,
     binary_mask_to_pil,
@@ -36,6 +40,7 @@ The current version includes:
 - A simple educational anomaly detector
 - Single-image inspection
 - Batch inspection with CSV-style reporting
+- Robustness testing under rotation, brightness, and contrast shifts
 """
 )
 
@@ -52,8 +57,13 @@ model_path = st.sidebar.text_input(
 explorer = MVTecDatasetExplorer(dataset_root)
 categories = explorer.categories()
 
-tab_data, tab_inspector, tab_batch = st.tabs(
-    ["Data Explorer", "Simple Baseline Inspector", "Batch Inspection"]
+tab_data, tab_inspector, tab_batch, tab_robustness = st.tabs(
+    [
+        "Data Explorer",
+        "Simple Baseline Inspector",
+        "Batch Inspection",
+        "Robustness Tests",
+    ]
 )
 
 
@@ -376,3 +386,211 @@ with tab_batch:
         else:
             st.warning(f"{len(errors_df)} errors found.")
             st.dataframe(errors_df, use_container_width=True)
+
+with tab_robustness:
+    st.markdown("## Robustness Tests")
+
+    st.info(
+        "Test how stable the anomaly detector is under real-world shifts such as rotation, brightness, and contrast changes."
+    )
+
+    if not categories:
+        st.warning("No dataset category found. Create or add an MVTec-style dataset first.")
+        st.stop()
+
+    if not Path(model_path).exists():
+        st.error(
+            f"Model file not found: {model_path}. Train it first with scripts/02_train_simple_baseline.py"
+        )
+        st.stop()
+
+    robustness_category = st.selectbox(
+        "Robustness category",
+        categories,
+        key="robustness_category",
+    )
+
+    robustness_df = explorer.dataframe(robustness_category)
+
+    if robustness_df.empty:
+        st.warning("No images found for this category.")
+        st.stop()
+
+    robustness_split_options = sorted(robustness_df["split"].unique())
+    robustness_split = st.selectbox(
+        "Robustness split",
+        robustness_split_options,
+        index=1 if "test" in robustness_split_options else 0,
+        key="robustness_split",
+    )
+
+    robustness_filtered = robustness_df[robustness_df["split"] == robustness_split].copy()
+
+    normal_only = st.checkbox(
+        "Test only normal / good images",
+        value=True,
+        help="Useful for measuring false positives under real-world shifts.",
+    )
+
+    if normal_only:
+        robustness_filtered = robustness_filtered[robustness_filtered["label"] == 0].copy()
+
+    st.markdown(f"Images selected for robustness testing: **{len(robustness_filtered)}**")
+
+    st.markdown("### Corruption Settings")
+
+    col_rot, col_bright, col_contrast = st.columns(3)
+
+    with col_rot:
+        enable_rotation = st.checkbox("Rotation", value=True)
+        rotation_values = st.multiselect(
+            "Rotation angles",
+            options=[5, -5, 10, -10, 90, 180, 270],
+            default=[5, -5, 10, -10, 90, 180, 270],
+        )
+
+    with col_bright:
+        enable_brightness = st.checkbox("Brightness", value=True)
+        brightness_values = st.multiselect(
+            "Brightness factors",
+            options=[0.7, 0.85, 1.15, 1.3],
+            default=[0.7, 0.85, 1.15, 1.3],
+        )
+
+    with col_contrast:
+        enable_contrast = st.checkbox("Contrast", value=True)
+        contrast_values = st.multiselect(
+            "Contrast factors",
+            options=[0.7, 0.85, 1.15, 1.3],
+            default=[0.7, 0.85, 1.15, 1.3],
+        )
+
+    corruptions = [("original", 0.0)]
+
+    if enable_rotation:
+        for value in rotation_values:
+            corruptions.append(("rotation", float(value)))
+
+    if enable_brightness:
+        for value in brightness_values:
+            corruptions.append(("brightness", float(value)))
+
+    if enable_contrast:
+        for value in contrast_values:
+            corruptions.append(("contrast", float(value)))
+
+    if st.button("Run Robustness Tests"):
+        if robustness_filtered.empty:
+            st.error("No images available for the selected robustness test.")
+            st.stop()
+
+        model = SimpleDifferenceAnomalyDetector.load(model_path)
+
+        with st.spinner("Running robustness tests..."):
+            report_df = build_robustness_report(
+                model=model,
+                image_records_df=robustness_filtered,
+                corruptions=corruptions,
+            )
+
+            summary_df = summarize_robustness_report(report_df)
+
+        st.markdown("### Robustness Summary")
+
+        if summary_df.empty:
+            st.warning("No robustness results generated.")
+            st.stop()
+
+        original_row = summary_df[
+            summary_df["corruption_type"].astype(str) == "original"
+        ]
+
+        shifted_rows = summary_df[
+            summary_df["corruption_type"].astype(str) != "original"
+        ]
+
+        baseline_accuracy = (
+            float(original_row["accuracy"].iloc[0])
+            if not original_row.empty
+            else None
+        )
+
+        worst_accuracy = (
+            float(shifted_rows["accuracy"].min())
+            if not shifted_rows.empty
+            else None
+        )
+
+        max_reject_rate = (
+            float(shifted_rows["reject_rate_percent"].max())
+            if not shifted_rows.empty
+            else None
+        )
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric("Tested Images", int(robustness_filtered.shape[0]))
+        col2.metric(
+            "Baseline Accuracy",
+            "N/A" if baseline_accuracy is None else f"{baseline_accuracy:.2%}",
+        )
+        col3.metric(
+            "Worst Shift Accuracy",
+            "N/A" if worst_accuracy is None else f"{worst_accuracy:.2%}",
+        )
+        col4.metric(
+            "Max Reject Rate",
+            "N/A" if max_reject_rate is None else f"{max_reject_rate:.2f}%",
+        )
+
+        st.dataframe(summary_df, use_container_width=True)
+
+        st.markdown("### Robustness Interpretation")
+
+        if normal_only and max_reject_rate is not None and max_reject_rate >= 90:
+            st.error(
+                "The model is highly sensitive to real-world shifts. Normal images are often rejected after rotation, brightness, or contrast changes."
+            )
+        elif worst_accuracy is not None and worst_accuracy < 0.8:
+            st.warning(
+                "The model performance drops under some shifts. This indicates limited robustness."
+            )
+        else:
+            st.success(
+                "The model appears stable under the selected shifts."
+            )
+
+        st.markdown("### Detailed Robustness Report")
+        st.dataframe(report_df, use_container_width=True)
+
+        summary_csv = summary_df.to_csv(index=False).encode("utf-8")
+        detail_csv = report_df.to_csv(index=False).encode("utf-8")
+
+        col_download1, col_download2 = st.columns(2)
+
+        with col_download1:
+            st.download_button(
+                label="Download Robustness Summary CSV",
+                data=summary_csv,
+                file_name=f"{robustness_category}_{robustness_split}_robustness_summary.csv",
+                mime="text/csv",
+            )
+
+        with col_download2:
+            st.download_button(
+                label="Download Detailed Robustness CSV",
+                data=detail_csv,
+                file_name=f"{robustness_category}_{robustness_split}_robustness_details.csv",
+                mime="text/csv",
+            )
+
+        st.markdown("### Failure Cases")
+
+        failure_df = report_df[report_df["correct"] == False]
+
+        if failure_df.empty:
+            st.success("No robustness failures found.")
+        else:
+            st.warning(f"{len(failure_df)} failure cases found.")
+            st.dataframe(failure_df, use_container_width=True)
+
