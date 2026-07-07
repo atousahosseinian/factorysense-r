@@ -10,6 +10,7 @@ sys.path.insert(0, str(SRC_ROOT))
 
 from factorysense.data.mvtec_loader import MVTecDatasetExplorer
 from factorysense.models.simple_baseline import SimpleDifferenceAnomalyDetector
+from factorysense.reporting.csv_report import summarize_inspection_report
 from factorysense.visualization.heatmap import (
     anomaly_map_to_pil,
     binary_mask_to_pil,
@@ -33,7 +34,8 @@ FactorySense-R is an educational and practical dashboard for industrial anomaly 
 The current version includes:
 - MVTec-style dataset exploration
 - A simple educational anomaly detector
-- Anomaly score, heatmap, binary mask, and Pass/Reject decision
+- Single-image inspection
+- Batch inspection with CSV-style reporting
 """
 )
 
@@ -50,8 +52,8 @@ model_path = st.sidebar.text_input(
 explorer = MVTecDatasetExplorer(dataset_root)
 categories = explorer.categories()
 
-tab_data, tab_inspector = st.tabs(
-    ["Data Explorer", "Simple Baseline Inspector"]
+tab_data, tab_inspector, tab_batch = st.tabs(
+    ["Data Explorer", "Simple Baseline Inspector", "Batch Inspection"]
 )
 
 
@@ -175,10 +177,11 @@ with tab_inspector:
         st.warning("No images found for this category.")
         st.stop()
 
+    inspector_split_options = sorted(inspector_df["split"].unique())
     inspector_split = st.selectbox(
         "Inspector split",
-        sorted(inspector_df["split"].unique()),
-        index=1 if "test" in sorted(inspector_df["split"].unique()) else 0,
+        inspector_split_options,
+        index=1 if "test" in inspector_split_options else 0,
         key="inspector_split",
     )
 
@@ -247,3 +250,129 @@ with tab_inspector:
             st.success(
                 "The image was classified as Pass because its anomaly score is below the calibrated threshold."
             )
+
+
+with tab_batch:
+    st.markdown("## Batch Inspection")
+
+    st.info(
+        "Run inspection on all images in a selected split and generate a quality analytics table."
+    )
+
+    if not categories:
+        st.warning("No dataset category found. Create or add an MVTec-style dataset first.")
+        st.stop()
+
+    if not Path(model_path).exists():
+        st.error(
+            f"Model file not found: {model_path}. Train it first with scripts/02_train_simple_baseline.py"
+        )
+        st.stop()
+
+    batch_category = st.selectbox(
+        "Batch category",
+        categories,
+        key="batch_category",
+    )
+
+    batch_df = explorer.dataframe(batch_category)
+
+    if batch_df.empty:
+        st.warning("No images found for this category.")
+        st.stop()
+
+    batch_split_options = sorted(batch_df["split"].unique())
+    batch_split = st.selectbox(
+        "Batch split",
+        batch_split_options,
+        index=1 if "test" in batch_split_options else 0,
+        key="batch_split",
+    )
+
+    batch_filtered = batch_df[batch_df["split"] == batch_split].copy()
+
+    st.markdown(f"Images selected for batch inspection: **{len(batch_filtered)}**")
+
+    if st.button("Run Batch Inspection"):
+        model = SimpleDifferenceAnomalyDetector.load(model_path)
+
+        rows = []
+
+        progress = st.progress(0)
+
+        for idx, row in enumerate(batch_filtered.to_dict("records")):
+            image_path = row["path"]
+
+            result = model.predict(image_path)
+            binary_mask = model.binary_mask(image_path)
+
+            defect_area_percent = float(binary_mask.mean() * 100)
+
+            predicted_label = 1 if result["decision"] == "Reject" else 0
+            true_label = int(row["label"])
+            correct = predicted_label == true_label
+
+            rows.append(
+                {
+                    "image_path": image_path,
+                    "category": row["category"],
+                    "split": row["split"],
+                    "defect_type": row["defect_type"],
+                    "true_label": true_label,
+                    "status": row["status"],
+                    "anomaly_score": result["anomaly_score"],
+                    "threshold": result["threshold"],
+                    "decision": result["decision"],
+                    "predicted_label": predicted_label,
+                    "defect_area_percent": defect_area_percent,
+                    "correct": correct,
+                }
+            )
+
+            progress.progress((idx + 1) / len(batch_filtered))
+
+        import pandas as pd
+
+        report_df = pd.DataFrame(rows)
+        summary = summarize_inspection_report(report_df)
+
+        st.markdown("### Batch Summary")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric("Total Images", summary["total_images"])
+        col2.metric("Rejected", summary["rejected_images"])
+        col3.metric("Passed", summary["passed_images"])
+        col4.metric("Defect Rate", f"{summary['defect_rate_percent']:.2f}%")
+
+        col5, col6, col7 = st.columns(3)
+
+        col5.metric("Mean Score", f"{summary['mean_anomaly_score']:.4f}")
+        col6.metric("Mean Defect Area", f"{summary['mean_defect_area_percent']:.2f}%")
+
+        if summary["accuracy"] is not None:
+            col7.metric("Accuracy", f"{summary['accuracy']:.2%}")
+        else:
+            col7.metric("Accuracy", "N/A")
+
+        st.markdown("### Batch Report")
+        st.dataframe(report_df, use_container_width=True)
+
+        csv_bytes = report_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Download CSV Report",
+            data=csv_bytes,
+            file_name=f"{batch_category}_{batch_split}_inspection_report.csv",
+            mime="text/csv",
+        )
+
+        st.markdown("### Error Analysis Preview")
+
+        errors_df = report_df[report_df["correct"] == False]
+
+        if errors_df.empty:
+            st.success("No errors found in this batch.")
+        else:
+            st.warning(f"{len(errors_df)} errors found.")
+            st.dataframe(errors_df, use_container_width=True)
