@@ -216,3 +216,68 @@ Planned improvements:
 - The simple baseline is not robust to lighting, contrast, and rotation shifts.
 - Real factory deployment requires calibration with real production data.
 - Stronger feature-based models are needed for real industrial inspection.
+
+## Robustness Improvement: Rotation-Augmented PatchCore-style
+
+After testing the simple baseline and the first PatchCore-style model, we found three key results.
+
+### 1. Simple Baseline
+
+The simple pixel-difference baseline works on clean aligned demo images, but fails under real-world shifts.
+
+- Clean test accuracy: 100%
+- Brightness shift: fails
+- Contrast shift: fails
+- Rotation shift: fails
+
+On normal-only shifted images, the simple baseline rejected all normal images.
+
+### 2. PatchCore-style Feature Baseline
+
+The first PatchCore-style model uses ResNet18 patch features and a memory bank of normal image features.
+
+Results:
+
+- Clean test accuracy: 100%
+- Robust to brightness changes
+- Robust to contrast changes
+- Still sensitive to rotation
+
+This shows that feature-based anomaly detection is more stable than raw pixel difference, but pose/rotation shift still causes false positives.
+
+### 3. Rotation-Augmented PatchCore-style
+
+To improve rotation robustness, the normal memory bank was augmented with rotated versions of normal training images.
+
+Rotation angles used:
+
+- -10 degrees
+- -5 degrees
+- 5 degrees
+- 10 degrees
+- 90 degrees
+- 180 degrees
+- 270 degrees
+
+Final result on the synthetic demo dataset:
+
+- Clean accuracy: 100%
+- Brightness robustness: 100%
+- Contrast robustness: 100%
+- Rotation robustness: 100%
+
+This means the rotation-augmented PatchCore-style model reduced false positives under rotation without losing defect detection performance.
+
+---
+
+## Current Technical Finding
+
+The project now demonstrates an important industrial anomaly detection lesson:
+
+> Robustness is not automatic. It must be tested, measured, and improved.
+
+The simple baseline looked strong on clean data but failed under shifts.  
+The PatchCore-style feature model improved lighting and contrast robustness.  
+The rotation-augmented memory bank improved rotation robustness.
+
+This makes FactorySense-R more than a dashboard demo: it is now an educational robustness analysis pipeline.
