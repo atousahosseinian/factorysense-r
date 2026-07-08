@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import pandas as pd
 
 import streamlit as st
 from PIL import Image
@@ -10,6 +11,7 @@ sys.path.insert(0, str(SRC_ROOT))
 
 from factorysense.data.mvtec_loader import MVTecDatasetExplorer
 from factorysense.models.simple_baseline import SimpleDifferenceAnomalyDetector
+from factorysense.models.model_loader import load_detector
 from factorysense.reporting.csv_report import summarize_inspection_report
 from factorysense.robustness.robustness_runner import (
     build_robustness_report,
@@ -57,12 +59,13 @@ model_path = st.sidebar.text_input(
 explorer = MVTecDatasetExplorer(dataset_root)
 categories = explorer.categories()
 
-tab_data, tab_inspector, tab_batch, tab_robustness = st.tabs(
+tab_data, tab_inspector, tab_batch, tab_robustness, tab_model_comparison = st.tabs(
     [
         "Data Explorer",
         "Simple Baseline Inspector",
         "Batch Inspection",
         "Robustness Tests",
+        "Model Comparison",
     ]
 )
 
@@ -593,4 +596,321 @@ with tab_robustness:
         else:
             st.warning(f"{len(failure_df)} failure cases found.")
             st.dataframe(failure_df, use_container_width=True)
+
+with tab_model_comparison:
+    st.markdown("## Model Comparison")
+
+    st.info(
+        "Compare the educational simple baseline, PatchCore-style feature baseline, and rotation-augmented PatchCore-style model on the same dataset split."
+    )
+
+    if not categories:
+        st.warning("No dataset category found. Create or add an MVTec-style dataset first.")
+        st.stop()
+
+    comparison_category = st.selectbox(
+        "Comparison category",
+        categories,
+        key="comparison_category",
+    )
+
+    comparison_df = explorer.dataframe(comparison_category)
+
+    if comparison_df.empty:
+        st.warning("No images found for this category.")
+        st.stop()
+
+    comparison_split_options = sorted(comparison_df["split"].unique())
+    comparison_split = st.selectbox(
+        "Comparison split",
+        comparison_split_options,
+        index=1 if "test" in comparison_split_options else 0,
+        key="comparison_split",
+    )
+
+    comparison_filtered = comparison_df[
+        comparison_df["split"] == comparison_split
+    ].copy()
+
+    st.markdown(f"Images selected: **{len(comparison_filtered)}**")
+
+    st.markdown("### Model Paths")
+
+    simple_path = st.text_input(
+        "Simple baseline model",
+        value="models/simple_baseline_bottle.npz",
+        key="comparison_simple_path",
+    )
+
+    patchcore_path = st.text_input(
+        "PatchCore-style model",
+        value="models/patchcore_style_bottle.npz",
+        key="comparison_patchcore_path",
+    )
+
+    patchcore_aug_path = st.text_input(
+        "Rotation-augmented PatchCore-style model",
+        value="models/patchcore_style_aug_bottle.npz",
+        key="comparison_patchcore_aug_path",
+    )
+
+    comparison_device = st.selectbox(
+        "Device",
+        ["cpu", "auto"],
+        index=0,
+        key="comparison_device",
+    )
+
+    selected_models = st.multiselect(
+        "Models to compare",
+        options=["simple", "patchcore_style", "patchcore_style_aug"],
+        default=["simple", "patchcore_style", "patchcore_style_aug"],
+    )
+
+    model_path_map = {
+        "simple": simple_path,
+        "patchcore_style": patchcore_path,
+        "patchcore_style_aug": patchcore_aug_path,
+    }
+
+    def run_single_model_comparison(model_name, model, df):
+        rows = []
+
+        for row in df.to_dict("records"):
+            image_path = row["path"]
+
+            result = model.predict(image_path)
+            binary_mask = model.binary_mask(image_path)
+
+            predicted_label = 1 if result["decision"] == "Reject" else 0
+            true_label = int(row["label"])
+            correct = predicted_label == true_label
+
+            rows.append(
+                {
+                    "model_name": model_name,
+                    "image_path": image_path,
+                    "category": row["category"],
+                    "split": row["split"],
+                    "defect_type": row["defect_type"],
+                    "true_label": true_label,
+                    "status": row["status"],
+                    "anomaly_score": result["anomaly_score"],
+                    "threshold": result["threshold"],
+                    "decision": result["decision"],
+                    "predicted_label": predicted_label,
+                    "defect_area_percent": float(binary_mask.mean() * 100),
+                    "correct": correct,
+                }
+            )
+
+        return pd.DataFrame(rows)
+
+    if st.button("Run Clean Model Comparison"):
+        all_reports = []
+        summary_rows = []
+
+        for selected_model in selected_models:
+            selected_path = Path(model_path_map[selected_model])
+
+            if not selected_path.exists():
+                st.warning(f"Skipping {selected_model}: model not found at {selected_path}")
+                continue
+
+            with st.spinner(f"Running {selected_model}..."):
+                model = load_detector(
+                    model_name=selected_model,
+                    model_path=selected_path,
+                    device=comparison_device,
+                )
+
+                report_df = run_single_model_comparison(
+                    model_name=selected_model,
+                    model=model,
+                    df=comparison_filtered,
+                )
+
+            summary = summarize_inspection_report(report_df)
+            summary["model_name"] = selected_model
+            summary_rows.append(summary)
+            all_reports.append(report_df)
+
+        if not all_reports:
+            st.error("No model reports were generated.")
+            st.stop()
+
+        clean_report_df = pd.concat(all_reports, ignore_index=True)
+        clean_summary_df = pd.DataFrame(summary_rows)
+
+        clean_summary_df = clean_summary_df[
+            ["model_name"] + [col for col in clean_summary_df.columns if col != "model_name"]
+        ]
+
+        st.markdown("### Clean Dataset Comparison Summary")
+        st.dataframe(clean_summary_df, use_container_width=True)
+
+        st.markdown("### Clean Dataset Detailed Report")
+        st.dataframe(clean_report_df, use_container_width=True)
+
+        st.download_button(
+            label="Download Clean Comparison Summary CSV",
+            data=clean_summary_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"{comparison_category}_{comparison_split}_model_comparison_summary.csv",
+            mime="text/csv",
+        )
+
+        st.download_button(
+            label="Download Clean Comparison Detailed CSV",
+            data=clean_report_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"{comparison_category}_{comparison_split}_model_comparison_details.csv",
+            mime="text/csv",
+        )
+
+    st.divider()
+
+    st.markdown("## Robustness Model Comparison")
+
+    normal_only_comparison = st.checkbox(
+        "Robustness comparison on normal / good images only",
+        value=True,
+        key="robustness_comparison_normal_only",
+    )
+
+    robustness_comparison_df = comparison_filtered.copy()
+
+    if normal_only_comparison:
+        robustness_comparison_df = robustness_comparison_df[
+            robustness_comparison_df["label"] == 0
+        ].copy()
+
+    st.markdown(f"Robustness images selected: **{len(robustness_comparison_df)}**")
+
+    col_rot_cmp, col_bright_cmp, col_contrast_cmp = st.columns(3)
+
+    with col_rot_cmp:
+        cmp_enable_rotation = st.checkbox("Compare rotation", value=True)
+        cmp_rotation_values = st.multiselect(
+            "Compare rotation angles",
+            options=[5, -5, 10, -10, 90, 180, 270],
+            default=[5, -5, 10, -10, 90, 180, 270],
+            key="cmp_rotation_values",
+        )
+
+    with col_bright_cmp:
+        cmp_enable_brightness = st.checkbox("Compare brightness", value=True)
+        cmp_brightness_values = st.multiselect(
+            "Compare brightness factors",
+            options=[0.7, 0.85, 1.15, 1.3],
+            default=[0.7, 0.85, 1.15, 1.3],
+            key="cmp_brightness_values",
+        )
+
+    with col_contrast_cmp:
+        cmp_enable_contrast = st.checkbox("Compare contrast", value=True)
+        cmp_contrast_values = st.multiselect(
+            "Compare contrast factors",
+            options=[0.7, 0.85, 1.15, 1.3],
+            default=[0.7, 0.85, 1.15, 1.3],
+            key="cmp_contrast_values",
+        )
+
+    comparison_corruptions = [("original", 0.0)]
+
+    if cmp_enable_rotation:
+        for value in cmp_rotation_values:
+            comparison_corruptions.append(("rotation", float(value)))
+
+    if cmp_enable_brightness:
+        for value in cmp_brightness_values:
+            comparison_corruptions.append(("brightness", float(value)))
+
+    if cmp_enable_contrast:
+        for value in cmp_contrast_values:
+            comparison_corruptions.append(("contrast", float(value)))
+
+    if st.button("Run Robustness Model Comparison"):
+        all_robustness_reports = []
+        all_robustness_summaries = []
+
+        if robustness_comparison_df.empty:
+            st.error("No images available for robustness comparison.")
+            st.stop()
+
+        for selected_model in selected_models:
+            selected_path = Path(model_path_map[selected_model])
+
+            if not selected_path.exists():
+                st.warning(f"Skipping {selected_model}: model not found at {selected_path}")
+                continue
+
+            with st.spinner(f"Running robustness for {selected_model}..."):
+                model = load_detector(
+                    model_name=selected_model,
+                    model_path=selected_path,
+                    device=comparison_device,
+                )
+
+                report_df = build_robustness_report(
+                    model=model,
+                    image_records_df=robustness_comparison_df,
+                    corruptions=comparison_corruptions,
+                )
+
+                summary_df = summarize_robustness_report(report_df)
+
+            report_df.insert(0, "model_name", selected_model)
+            summary_df.insert(0, "model_name", selected_model)
+
+            all_robustness_reports.append(report_df)
+            all_robustness_summaries.append(summary_df)
+
+        if not all_robustness_reports:
+            st.error("No robustness reports were generated.")
+            st.stop()
+
+        robustness_report_df = pd.concat(all_robustness_reports, ignore_index=True)
+        robustness_summary_df = pd.concat(all_robustness_summaries, ignore_index=True)
+
+        st.markdown("### Robustness Comparison Summary")
+        st.dataframe(robustness_summary_df, use_container_width=True)
+
+        st.markdown("### Key Interpretation")
+
+        simple_shift_failures = robustness_summary_df[
+            (robustness_summary_df["model_name"] == "simple")
+            & (robustness_summary_df["corruption_type"] != "original")
+            & (robustness_summary_df["reject_rate_percent"] >= 90)
+        ]
+
+        aug_rotation_success = robustness_summary_df[
+            (robustness_summary_df["model_name"] == "patchcore_style_aug")
+            & (robustness_summary_df["corruption_type"] == "rotation")
+            & (robustness_summary_df["accuracy"] >= 0.99)
+        ]
+
+        if not simple_shift_failures.empty and not aug_rotation_success.empty:
+            st.success(
+                "The comparison shows the full project story: the simple baseline fails under shifts, while the rotation-augmented PatchCore-style model remains robust."
+            )
+        else:
+            st.info(
+                "Review the summary table to compare how each model behaves under each shift."
+            )
+
+        st.markdown("### Robustness Detailed Report")
+        st.dataframe(robustness_report_df, use_container_width=True)
+
+        st.download_button(
+            label="Download Robustness Comparison Summary CSV",
+            data=robustness_summary_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"{comparison_category}_{comparison_split}_robustness_model_comparison_summary.csv",
+            mime="text/csv",
+        )
+
+        st.download_button(
+            label="Download Robustness Comparison Detailed CSV",
+            data=robustness_report_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"{comparison_category}_{comparison_split}_robustness_model_comparison_details.csv",
+            mime="text/csv",
+        )
 
