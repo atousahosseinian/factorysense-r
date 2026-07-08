@@ -306,3 +306,7 @@ The PatchCore-style feature model improved lighting and contrast robustness.
 The rotation-augmented memory bank improved rotation robustness.
 
 This makes FactorySense-R more than a dashboard demo: it is now an educational robustness analysis pipeline.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
