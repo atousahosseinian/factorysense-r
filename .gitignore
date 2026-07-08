@@ -33,6 +33,8 @@ assets/*
 !assets/.gitkeep
 !assets/results/
 !assets/results/**
+!assets/screenshots/
+!assets/screenshots/**
 
 # Model weights and exported models
 *.pt

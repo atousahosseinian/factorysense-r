@@ -61,6 +61,12 @@ Current results are documented here:
 
 [FactorySense-R Results](docs/results.md)
 
+## Dashboard Preview
+
+### Robustness Model Comparison
+
+![Robustness Model Comparison](assets/screenshots/model_comparison.png)
+
 ## Demo Dataset
 
 For the first development phase, the project uses a lightweight synthetic MVTec-style demo dataset.
