@@ -6,7 +6,26 @@ FactorySense-R is an educational and practical computer vision project for indus
 
 The goal is to detect visual anomalies in industrial product images, generate anomaly heatmaps, and make Pass/Reject decisions under real-world shifts such as rotation, lighting changes, limited normal samples, and defect scale variation.
 
----
+---## Dashboard Preview
+
+### Data Explorer
+
+![Data Explorer](assets/screenshots/data_explorer.png)
+
+### Batch Inspection
+
+![Batch Inspection](assets/screenshots/batch_inspection.png)
+
+### Model Comparison
+
+![Model Comparison](assets/screenshots/model_comparison.png)
+
+## Result Files
+
+The main result CSV files are available here:
+
+- [Clean test model comparison](assets/results/bottle_test_model_comparison_summary.csv)
+- [Robustness model comparison](assets/results/bottle_test_robustness_model_comparison_summary.csv)
 
 ## Project Goals
 

@@ -1,0 +1,3 @@
+model_name,total_images,rejected_images,passed_images,defect_rate_percent,accuracy,mean_anomaly_score,mean_defect_area_percent,tp,tn,fp,fn
+simple,18,12,6,66.66666666666666,1.0,0.26751364671832156,1.9750807020399306,12,6,0,0
+patchcore_style,18,12,6,66.66666666666666,1.0,0.681763748327891,2.9821607801649304,12,6,0,0

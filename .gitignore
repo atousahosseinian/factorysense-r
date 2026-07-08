@@ -31,6 +31,8 @@ reports/*
 
 assets/*
 !assets/.gitkeep
+!assets/results/
+!assets/results/**
 
 # Model weights and exported models
 *.pt
