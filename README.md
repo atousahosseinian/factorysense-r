@@ -36,6 +36,12 @@ The current version includes:
 
 ---
 
+## Results
+
+Current results are documented here:
+
+[FactorySense-R Results](docs/results.md)
+
 ## Demo Dataset
 
 For the first development phase, the project uses a lightweight synthetic MVTec-style demo dataset.
