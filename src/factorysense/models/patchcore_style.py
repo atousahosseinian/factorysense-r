@@ -22,17 +22,35 @@ def select_device(device: str = "auto") -> torch.device:
     return torch.device(device)
 
 
-def load_image_tensor(path: str | Path, image_size: int = 256) -> torch.Tensor:
-    image = Image.open(path).convert("RGB")
+def pil_to_tensor(image: Image.Image, image_size: int = 256) -> torch.Tensor:
+    image = image.convert("RGB")
     image = image.resize((image_size, image_size))
 
     array = np.asarray(image).astype("float32") / 255.0
     tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0)
 
-    mean = IMAGENET_MEAN
-    std = IMAGENET_STD
+    return (tensor - IMAGENET_MEAN) / IMAGENET_STD
 
-    return (tensor - mean) / std
+
+def load_image_tensor(path: str | Path, image_size: int = 256) -> torch.Tensor:
+    image = Image.open(path).convert("RGB")
+    return pil_to_tensor(image, image_size=image_size)
+
+
+def rotate_pil_image(image: Image.Image, angle: float) -> Image.Image:
+    """
+    Rotate a PIL image while keeping the same canvas size.
+    Uses the corner color as fill to reduce black-border artifacts.
+    """
+    image = image.convert("RGB")
+    fill_color = image.getpixel((0, 0))
+
+    return image.rotate(
+        angle,
+        resample=Image.Resampling.BICUBIC,
+        expand=False,
+        fillcolor=fill_color,
+    )
 
 
 class ResNet18Layer2Extractor(nn.Module):
@@ -45,8 +63,6 @@ class ResNet18Layer2Extractor(nn.Module):
 
     def __init__(self, pretrained: bool = True):
         super().__init__()
-
-        weights = None
 
         if pretrained:
             try:
@@ -77,9 +93,10 @@ class PatchCoreStyleAnomalyDetector:
     """
     A lightweight PatchCore-style anomaly detector.
 
-    This model is designed for learning:
+    Learning goals:
     - extract pretrained CNN patch features
     - build a memory bank from normal images
+    - optionally augment normal memory with rotations
     - score test patches using nearest-neighbor distance
     - create anomaly maps and Pass/Reject decisions
     """
@@ -103,40 +120,63 @@ class PatchCoreStyleAnomalyDetector:
         self.base_threshold: float | None = None
         self.threshold_multiplier: float = 1.0
         self.threshold_margin: float = 0.0
+        self.augmentation_rotations: list[float] = []
 
     @torch.no_grad()
-    def extract_feature_map(self, image_path: str | Path) -> torch.Tensor:
-        tensor = load_image_tensor(image_path, image_size=self.image_size).to(self.device)
+    def extract_feature_map_from_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        tensor = tensor.to(self.device)
         features = self.extractor(tensor)
         features = F.normalize(features, p=2, dim=1)
         return features.squeeze(0)
 
     @torch.no_grad()
-    def extract_patch_features(self, image_path: str | Path) -> torch.Tensor:
-        feature_map = self.extract_feature_map(image_path)
-        channels, height, width = feature_map.shape
+    def extract_feature_map(self, image_path: str | Path) -> torch.Tensor:
+        tensor = load_image_tensor(image_path, image_size=self.image_size)
+        return self.extract_feature_map_from_tensor(tensor)
 
+    @torch.no_grad()
+    def extract_patch_features_from_pil(self, image: Image.Image) -> torch.Tensor:
+        tensor = pil_to_tensor(image, image_size=self.image_size)
+        feature_map = self.extract_feature_map_from_tensor(tensor)
+
+        channels, height, width = feature_map.shape
         patches = feature_map.permute(1, 2, 0).reshape(height * width, channels)
         patches = F.normalize(patches, p=2, dim=1)
 
         return patches.detach().cpu()
+
+    @torch.no_grad()
+    def extract_patch_features(self, image_path: str | Path) -> torch.Tensor:
+        image = Image.open(image_path).convert("RGB")
+        return self.extract_patch_features_from_pil(image)
 
     def fit(
         self,
         normal_image_paths: Iterable[str | Path],
         max_memory_patches: int = 5000,
         random_state: int = 42,
+        augmentation_rotations: Iterable[float] | None = None,
     ) -> None:
         paths = list(normal_image_paths)
 
         if not paths:
             raise ValueError("No normal images were provided for fitting.")
 
+        rotations = list(augmentation_rotations or [])
+        self.augmentation_rotations = [float(value) for value in rotations]
+
         all_patches = []
 
         for path in paths:
-            patches = self.extract_patch_features(path)
-            all_patches.append(patches)
+            image = Image.open(path).convert("RGB")
+
+            # Original normal image
+            all_patches.append(self.extract_patch_features_from_pil(image))
+
+            # Rotated normal images for robust memory bank
+            for angle in self.augmentation_rotations:
+                rotated = rotate_pil_image(image, angle)
+                all_patches.append(self.extract_patch_features_from_pil(rotated))
 
         memory_bank = torch.cat(all_patches, dim=0)
 
@@ -175,7 +215,6 @@ class PatchCoreStyleAnomalyDetector:
 
     def score(self, image_path: str | Path) -> float:
         amap = self.anomaly_map(image_path)
-
         return float(np.quantile(amap, 0.99))
 
     def calibrate_threshold(
@@ -242,6 +281,7 @@ class PatchCoreStyleAnomalyDetector:
             threshold_multiplier=self.threshold_multiplier,
             threshold_margin=self.threshold_margin,
             pretrained=int(self.pretrained),
+            augmentation_rotations=np.asarray(self.augmentation_rotations, dtype="float32"),
         )
 
     @classmethod
@@ -275,5 +315,10 @@ class PatchCoreStyleAnomalyDetector:
 
         if "threshold_margin" in data.files:
             model.threshold_margin = float(data["threshold_margin"])
+
+        if "augmentation_rotations" in data.files:
+            model.augmentation_rotations = [
+                float(value) for value in data["augmentation_rotations"].tolist()
+            ]
 
         return model

@@ -10,6 +10,13 @@ from factorysense.data.dataset_utils import list_image_files
 from factorysense.models.patchcore_style import PatchCoreStyleAnomalyDetector
 
 
+def parse_rotation_list(value: str) -> list[float]:
+    if not value:
+        return []
+
+    return [float(item.strip()) for item in value.split(",") if item.strip()]
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Train a lightweight PatchCore-style anomaly detector."
@@ -20,6 +27,7 @@ def main():
     parser.add_argument("--device", default="auto")
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--max-memory-patches", type=int, default=5000)
+    parser.add_argument("--augmentation-rotations", default="")
     parser.add_argument("--threshold-quantile", type=float, default=0.95)
     parser.add_argument("--threshold-multiplier", type=float, default=1.2)
     parser.add_argument("--threshold-margin", type=float, default=0.0)
@@ -32,6 +40,8 @@ def main():
     if not normal_paths:
         raise FileNotFoundError(f"No normal training images found in {train_good_dir}")
 
+    augmentation_rotations = parse_rotation_list(args.augmentation_rotations)
+
     model = PatchCoreStyleAnomalyDetector(
         image_size=args.image_size,
         device=args.device,
@@ -41,10 +51,12 @@ def main():
     print("Training PatchCore-style model...")
     print(f"Device: {model.device}")
     print(f"Normal images: {len(normal_paths)}")
+    print(f"Augmentation rotations: {augmentation_rotations}")
 
     model.fit(
         normal_paths,
         max_memory_patches=args.max_memory_patches,
+        augmentation_rotations=augmentation_rotations,
     )
 
     threshold = model.calibrate_threshold(
@@ -62,6 +74,7 @@ def main():
     print(f"Base threshold: {model.base_threshold:.6f}")
     print(f"Threshold multiplier: {model.threshold_multiplier:.3f}")
     print(f"Final threshold: {threshold:.6f}")
+    print(f"Augmentation rotations: {model.augmentation_rotations}")
     print(f"Saved model to: {args.output}")
 
 
